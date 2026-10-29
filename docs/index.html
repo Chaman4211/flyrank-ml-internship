@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="A public-safe, leakage-aware research note on content refresh prioritization using anonymized FlyRank search data.">
+<title>Content Refresh Prioritization — Chaman Afzaal</title>
+<style>
+:root{--ink:#17212b;--muted:#596775;--line:#dbe2e8;--paper:#fff;--soft:#f4f7f9;--accent:#176b87;--accent2:#dceef3;--max:1040px}
+*{box-sizing:border-box}html{scroll-behavior:smooth}body{margin:0;background:var(--paper);color:var(--ink);font:17px/1.72 ui-serif,Georgia,Cambria,"Times New Roman",serif}
+a{color:#075f7c;text-underline-offset:3px}a:hover{color:#043e52}header,main,footer{width:min(var(--max),calc(100% - 40px));margin-inline:auto}
+header{padding:62px 0 36px;border-bottom:1px solid var(--line)}.eyebrow,.meta,.nav,.kicker{font:600 12px/1.5 ui-sans-serif,system-ui,sans-serif;letter-spacing:.11em;text-transform:uppercase;color:var(--muted)}
+h1,h2,h3,.metric strong{font-family:ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;line-height:1.2;letter-spacing:-.035em}
+h1{font-size:clamp(2.5rem,6vw,4.8rem);max-width:850px;margin:18px 0}.subtitle{font:400 clamp(1.1rem,2.2vw,1.45rem)/1.5 ui-sans-serif,system-ui,sans-serif;color:var(--muted);max-width:760px}
+.meta{letter-spacing:.02em;text-transform:none;margin-top:24px}.nav{display:flex;flex-wrap:wrap;gap:9px 18px;margin-top:28px;letter-spacing:0;text-transform:none}
+main{padding:26px 0 70px}section{padding:38px 0;border-bottom:1px solid var(--line)}h2{font-size:clamp(1.6rem,3vw,2.2rem);margin:0 0 18px}h3{font-size:1.15rem;margin:28px 0 10px}p{max-width:850px}li{margin:.45em 0}.abstract{font-size:1.12rem;max-width:880px}.callout{background:var(--soft);border-left:4px solid var(--accent);padding:16px 20px;margin:22px 0;max-width:900px;font:15px/1.7 ui-sans-serif,system-ui,sans-serif}.grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin:24px 0}.metric{border:1px solid var(--line);border-radius:12px;padding:18px;background:#fff}.metric strong{display:block;font-size:2rem;letter-spacing:-.04em}.metric span{display:block;color:var(--muted);font:13px/1.5 ui-sans-serif,system-ui,sans-serif;margin-top:6px}
+table{border-collapse:collapse;width:100%;margin:18px 0;font:14px/1.55 ui-sans-serif,system-ui,sans-serif}th,td{border-bottom:1px solid var(--line);padding:11px 12px;text-align:left;vertical-align:top}th{background:var(--soft);font-weight:700}td:not(:first-child),th:not(:first-child){font-variant-numeric:tabular-nums}
+.chart{border:1px solid var(--line);border-radius:12px;padding:18px;margin:22px 0;background:#fff}.chart svg{display:block;width:100%;height:auto}.caption{font:13px/1.6 ui-sans-serif,system-ui,sans-serif;color:var(--muted);margin:10px 0 0}.small{font:14px/1.65 ui-sans-serif,system-ui,sans-serif;color:var(--muted)}code{font-size:.9em;background:var(--soft);padding:.1em .3em;border-radius:4px;overflow-wrap:anywhere}.pill{display:inline-block;border:1px solid var(--line);border-radius:999px;padding:4px 10px;font:12px ui-sans-serif,system-ui,sans-serif;color:var(--muted);margin:3px 5px 3px 0}
+footer{padding:28px 0 50px;color:var(--muted);font:13px/1.7 ui-sans-serif,system-ui,sans-serif}
+@media(max-width:700px){body{font-size:16px}header{padding-top:38px}.grid{grid-template-columns:1fr}.nav{gap:10px}th,td{padding:8px 7px;font-size:12px}.metric strong{font-size:1.7rem}}
+@media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}}
+</style>
+</head>
+<body>
+<header>
+<div class="eyebrow">Research note · Applied Search Intelligence</div>
+<h1>Can a learned ranking help teams choose which content to review first?</h1>
+<div class="subtitle">A leakage-aware comparison of a transparent content-refresh rule and Logistic Regression, with a human-review action playbook.</div>
+<div class="meta">Chaman Afzaal · FlyRank ML Internship · 29 October 2026</div>
+<nav class="nav" aria-label="Paper sections">
+<a href="#abstract">Abstract</a><a href="#problem">Problem</a><a href="#data">Data</a><a href="#method">Methodology</a><a href="#results">Results</a><a href="#limits">Limitations</a><a href="#actions">Recommendations</a><a href="#repro">Reproducibility</a>
+</nav>
+</header>
+<main>
+<section id="abstract">
+<div class="kicker">01 · Abstract</div>
+<h2>Question, method, result, and use</h2>
+<p class="abstract">Can a learned ranking help people prioritize content items for review better than a transparent freshness-and-visibility rule? I examined FlyRank’s anonymized search-performance resources, including the 78,835,655-row daily warehouse release, and benchmarked the model on the separate 30,000-row starter slice. On a client-held-out test set of 7,115 starter-slice rows, Logistic Regression achieved average precision 0.529, Precision@20 0.600, and Precision@50 0.640, compared with 0.504, 0.450, and 0.440 for the Week-4 rule on the same rows. The test set’s observed decline-label rate was 0.517, and the split held out eight clients with no client overlap. These results support further human-reviewed testing on the starter slice, not a claim that refreshing a page causes recovery or that these metrics generalize to a model trained on the full warehouse.</p>
+<div class="callout"><strong>Scope, stated plainly:</strong> the warehouse table counts describe the full release; the headline model comparison below is from the anonymized starter slice. This page does not present the starter-slice model as a full-warehouse model.</div>
+<div class="grid">
+<div class="metric"><strong>78.8M</strong><span>daily warehouse rows in the release profile</span></div>
+<div class="metric"><strong>+0.025</strong><span>average-precision difference on the starter-slice holdout</span></div>
+<div class="metric"><strong>0 overlap</strong><span>clients shared by training and test splits</span></div>
+</div>
+</section>
+<section id="problem">
+<div class="kicker">02 · Introduction / problem statement</div><h2>Limited time means review order matters</h2>
+<p>A team may have thousands of content items but limited time to inspect them. The practical question is not which page a system should automatically rewrite. It is which page a person should inspect first, and why.</p>
+<p>This study compares a readable rule—old enough and still visible in search—with Logistic Regression using content and keyword-context fields. The output is a review priority, not an automatic refresh command. A useful ranking should put more pages carrying the observed decline label near the top, while leaving the final decision to a human.</p>
+</section>
+<section id="data">
+<div class="kicker">03 · Data</div><h2>Release, grain, dates, and exclusions</h2>
+<p>The full warehouse release is <strong>build v20260703</strong>. The daily performance history covers 27 January 2025 through 30 June 2026.</p>
+<table><thead><tr><th>Table</th><th>Rows</th><th>Grain</th></tr></thead><tbody>
+<tr><td><code>dim_clients</code></td><td>104</td><td>One pseudonymized client</td></tr>
+<tr><td><code>dim_content</code></td><td>519,606</td><td>One content item</td></tr>
+<tr><td><td><code>fact_content_daily_performance</code></td><td>78,835,655</td><td>Report date × client × content</td></tr>
+<tr><td><code>fact_content_daily_performance_sample</code></td><td>11,694,072</td><td>Same grain; final month only</td></tr>
+<tr><td><code>fact_content_query_90d</code></td><td>2,414,248</td><td>Client × content × query hash</td></tr>
+</tbody></table>
+<p>The saved full-release exploration derived 155,903 content items with enough history under its initial filter. The headline model comparison, however, uses the <strong>30,000-row starter slice</strong> with 44 source columns and 32 pseudonymized clients. Starter-slice metrics are not described as full-warehouse model results.</p>
+<h3>What is excluded and why</h3>
+<ul>
+<li>Client names, domains, page URLs, raw search queries, query hashes, credentials, row-level outputs, and data exports are not published.</li>
+<li><code>content_id</code> and <code>client_id</code> are used only for grouping and joins, never as model features.</li>
+<li>The label, <code>trend_direction</code>, <code>trend_pct</code>, direct 30-day trend inputs, current traffic totals, and product-generated flags are excluded from the model features.</li>
+<li>The final-month warehouse sample was not used to design label logic. The full-release prototype’s outcome-window-overlapping features are not used as headline evidence.</li>
+</ul>
+<p class="small">The warehouse includes a mix of GSC and GA4 availability. The data guide warns that history depth differs by client and unavailable GA4 values may be zero-filled with an explicit availability flag. These differences limit simple cross-client comparisons.</p>
+</section>
+<section id="method">
+<div class="kicker">04 · Methodology</div><h2>Target, features, baseline, and validation</h2>
+<h3>Target</h3><p>The starter benchmark defines <code>is_declining_label = (trend_direction == "down")</code>. This is an observed trend label from the snapshot—not a verified future-period forecast and not a label for successful recovery after a refresh.</p>
+<h3>Model features</h3><p>Logistic Regression uses <code>content_age_days</code>, <code>days_since_last_update</code>, <code>word_count</code>, <code>char_count</code>, <code>search_volume</code>, <code>competition</code>, <code>cpc</code>, <code>content_type</code>, <code>main_intent</code>, and <code>competition_level</code>. Numeric missing values are median-imputed with missingness indicators and scaled. Categorical missing values are labeled “unknown” and one-hot encoded. Preprocessing is fitted only on training rows.</p>
+<h3>Baseline and validation</h3><p>The Week-4 baseline selects pages at least <strong>180 days</strong> since their last update and with at least <strong>500 impressions</strong> over 90 days, ranking qualifying pages by impressions. The benchmark uses a fixed <code>GroupShuffleSplit</code> with <code>test_size=0.25</code> and seed <code>42</code>, grouping by client. The saved run has 22,885 training rows from 24 clients and 7,115 test rows from eight clients; client overlap is zero. Both rankings are evaluated on the same test rows.</p>
+<h3>Leakage checks</h3><p>The Week-6 audit reports passing checks for label exclusion, trend-field exclusion, IDs, direct 30-day inputs, current traffic totals/product flags, and client overlap. The audit also notes the snapshot cannot prove every remaining feature was captured strictly before a future outcome window. A separate warehouse prototype used last-30-day position volatility and fixed-window query signals that may overlap its label period; those results are not treated as validated headline evidence here.</p>
+</section>
+<section id="results">
+<div class="kicker">05 · Results</div><h2>Model vs baseline on the same split</h2>
+<table><thead><tr><th>Method</th><th>Test base rate</th><th>Average precision</th><th>Precision@20</th><th>Precision@50</th></tr></thead><tbody>
+<tr><td>Week-4 rule baseline</td><td>0.517</td><td>0.504</td><td>0.450</td><td>0.440</td></tr>
+<tr><td><strong>Logistic Regression</strong></td><td>0.517</td><td><strong>0.529</strong></td><td><strong>0.600</strong></td><td><strong>0.640</strong></td></tr>
+</tbody></table>
+<div class="chart">
+<svg viewBox="0 0 760 310" role="img" aria-labelledby="charttitle chartdesc">
+<title id="charttitle">Precision at 20 and 50 for baseline and Logistic Regression</title><desc id="chartdesc">On the client-held-out starter-slice test set, baseline precision at 20 is 0.45 and at 50 is 0.44; Logistic Regression scores 0.60 and 0.64.</desc>
+<g font-family="system-ui,sans-serif" font-size="13" fill="#596775"><text x="12" y="22">Precision (share with observed decline label)</text></g>
+<g stroke="#dbe2e8" stroke-width="1"><line x1="130" y1="50" x2="710" y2="50"/><line x1="130" y1="100" x2="710" y2="100"/><line x1="130" y1="150" x2="710" y2="150"/><line x1="130" y1="200" x2="710" y2="200"/><line x1="130" y1="250" x2="710" y2="250"/></g>
+<g fill="#596775" font-family="system-ui,sans-serif" font-size="12"><text x="95" y="54">1.0</text><text x="95" y="104">0.8</text><text x="95" y="154">0.6</text><text x="95" y="204">0.4</text><text x="95" y="254">0.2</text></g>
+<g><rect x="210" y="137.5" width="70" height="112.5" fill="#9bb6c1" rx="4"/><rect x="292" y="140" width="70" height="110" fill="#6f8d9a" rx="4"/><rect x="470" y="100" width="70" height="150" fill="#176b87" rx="4"/><rect x="552" y="90" width="70" height="160" fill="#0f536c" rx="4"/></g>
+<g fill="#17212b" font-family="system-ui,sans-serif" font-size="13" font-weight="600" text-anchor="middle"><text x="245" y="129">0.45</text><text x="327" y="132">0.44</text><text x="505" y="92">0.60</text><text x="587" y="82">0.64</text></g>
+<g fill="#17212b" font-family="system-ui,sans-serif" font-size="13" text-anchor="middle"><text x="286" y="274">Rule baseline</text><text x="546" y="274">Logistic Regression</text></g>
+<g fill="#596775" font-family="system-ui,sans-serif" font-size="12"><text x="203" y="297">Left bar: P@20 · right bar: P@50</text></g>
+</svg>
+<p class="caption">Figure 1. Precision among the top-ranked pages on the same held-out test rows. Higher is better; the test base rate is 0.517. The chart is a starter-slice result, not a full-warehouse model result.</p>
+</div>
+<p>The model’s average precision was 0.025 higher. Precision@20 was 0.150 higher and Precision@50 was 0.200 higher. This is one client-held-out split, not a guarantee of future or cross-client performance.</p>
+<h3>Signal audit: freshness was not monotonic</h3>
+<table><thead><tr><th>Days since update</th><th>Rows</th><th>Observed decline rate</th></tr></thead><tbody><tr><td>0–30 days</td><td>20,480</td><td>51.14%</td></tr><tr><td>31–90 days</td><td>175</td><td>58.86%</td></tr><tr><td>91–180 days</td><td>9,171</td><td>61.11%</td></tr><tr><td>181+ days</td><td>174</td><td>47.13%</td></tr></tbody></table>
+<p>The oldest bucket is small and the pattern is not monotonic. Impression buckets also were not monotonic: observed decline rates were 38.90% (0–99 impressions), 60.44% (100–499), 62.06% (500–2,999), and 57.00% (3,000+). This does not support a simple claim that older or more visible pages reliably decline.</p>
+</section>
+<section id="limits">
+<div class="kicker">06 · Limitations & honest framing</div><h2>What this work cannot claim</h2>
+<ul>
+<li>The headline benchmark uses the 30,000-row starter snapshot. It is not a model trained on all 78.8 million daily warehouse rows.</li>
+<li>The label is an observed trend proxy, not a future forecast and not a refresh-success outcome.</li>
+<li>Client grouping reduces client leakage, but the validation is not time-forward. Seasonality, measurement changes, and future distribution shift remain possible.</li>
+<li>The baseline and model use different information, so this is an operational comparison rather than an equal-feature experiment.</li>
+<li>The 181+ day bucket contains only 174 rows. Its rate is not a stable population estimate.</li>
+<li>A static snapshot cannot show that updating a page causes performance to improve. Page selection can be influenced by factors absent from the data.</li>
+<li>Warehouse history and analytics availability vary by client. The initial warehouse model prototype had outcome-window overlap in some features and is not used as validated headline evidence.</li>
+</ul>
+<div class="callout"><strong>Safe conclusion:</strong> On this held-out starter-slice test, Logistic Regression ranked the observed decline label better than the Week-4 rule at the top 20 and top 50. This is directional decision-support evidence for further time-aware testing; it does not establish future decline or causal impact.</div>
+</section>
+<section id="actions">
+<div class="kicker">07 · Ranked recommendations</div><h2>Human-review action playbook</h2>
+<p>The queue is a review list, not an automatic refresh instruction. It uses only freshness and impressions, not the observed decline label, trend fields, or model predictions.</p>
+<ol>
+<li><strong>Stale and visible — review first.</strong> At least 180 days since update and at least 500 impressions in 90 days. Check intent, accuracy, freshness, and competing pages before deciding whether to edit. Reason code: <code>stale_visible_review</code>.</li>
+<li><strong>Visible but recently updated — inspect the search result.</strong> At least 500 impressions but less than 180 days since update. Review title/snippet alignment, intent, and possible cannibalization. Reason code: <code>visible_recent_review</code>.</li>
+<li><strong>Stale with low visibility — diagnose first.</strong> At least 180 days since update but fewer than 500 impressions. Check usefulness and possible explanations for low visibility. Reason code: <code>stale_low_visibility_check</code>.</li>
+<li><strong>Missing signal — verify data quality.</strong> Do not assign an action until freshness and impression fields are checked. Reason code: <code>missing_signal_manual_check</code>.</li>
+<li><strong>Routine monitoring.</strong> Do not spend refresh effort based on this queue alone. Reason code: <code>routine_monitor</code>.</li>
+</ol>
+<p>Every item needs human review. The rule is a transparent way to allocate attention; it is not proof that a page is declining or that a refresh will improve outcomes.</p>
+</section>
+<section id="repro">
+<div class="kicker">08 · Reproducibility</div><h2>Inspect the code and rerun the analysis</h2>
+<p><a href="https://github.com/Chaman4211/flyrank-ml-internship">Repository: Chaman4211/flyrank-ml-internship</a></p>
+<ul>
+<li><a href="../notebooks/03_working_with_the_full_release.ipynb">Full-release DuckDB exploration notebook</a></li>
+<li><a href="../work/notebooks/w04_baseline_score.ipynb">Week 4 baseline and signal audit</a></li>
+<li><a href="../work/notebooks/w05_model.ipynb">Week 5 model comparison</a></li>
+<li><a href="../work/notebooks/w06_validation_audit.ipynb">Week 6 validation and leakage audit</a></li>
+<li><a href="../work/notebooks/w07_action_playbook.ipynb">Week 7 action playbook</a></li>
+<li><a href="../work/notebooks/capstone.ipynb">Capstone notebook</a></li>
+<li><a href="../SETUP.md">Data access and setup instructions</a></li>
+</ul>
+<p>To reproduce the starter-slice benchmark, open the capstone notebook in Colab and run all cells. It uses seed 42 and a client-grouped 75/25 split. To rerun the warehouse profile, follow the setup guide, accept the gated dataset terms, and use a read-only Hugging Face token through Colab Secrets as <code>HF_TOKEN</code>. Never commit the token or warehouse extracts. The 79M-row scan is expensive; avoid unnecessary repeated scans.</p>
+</section>
+<section id="credit">
+<div class="kicker">09 · Acknowledgments & data credit</div><h2>Data provenance</h2>
+<p>This work was completed as part of the FlyRank ML Internship and uses the anonymized FlyRank internship data resources. The release documentation describes the data as aggregated from Google Search Console and Google Analytics into a pseudonymized warehouse.</p>
+<p><strong>Built on the <a href="https://flyrank.ai" target="_blank" rel="noopener noreferrer">FlyRank ML Internship dataset</a>.</strong></p>
+</section>
+</main>
+<footer>
+<p>Research note by Chaman Afzaal. Results are descriptive and directional. No client-identifying information, private queries, page URLs, or raw data are published.</p>
+<p>Page design draws on manuscript guidance for informative abstracts and the official GitHub Pages static publishing workflow.</p>
+</footer>
+</body>
+</html>
